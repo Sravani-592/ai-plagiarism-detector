@@ -15,8 +15,8 @@ This project implements an AI-powered semantic plagiarism detector using Streaml
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
-    cd YOUR_REPO_NAME
+    git clone https://github.com/Sravani-592/ai-plagiarism-detector.git
+    cd ai-plagiarism-detector
     ```
 
 2.  **Create a virtual environment (recommended):**
