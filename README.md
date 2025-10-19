@@ -70,6 +70,8 @@ This project implements an AI-powered semantic plagiarism detector using Streaml
 
 ai-plagiarism-detector
 ├── app.py # Main Streamlit application
+
+
 ├── detector.py # Core plagiarism detection logic (SemanticPlagiarismDetector class)
 ├── requirements.txt # Python dependencies
 ├── .gitignore # Files/folders to ignore by Git
