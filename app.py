@@ -100,8 +100,8 @@ def get_plagiarism_detector_instance():
         serpapi_key = os.environ.get("SERPAPI_KEY")
 
     # 3. Fallback to a placeholder/default key if still not found, but warn the user
-    # NOTE: "9af753087cdcdb04ecfd22ba7095e8a4baa4d212a9aaa7b4c73e9e0b331313e2" is your *actual* key.
-    DEFAULT_SERPAPI_KEY = "9af753087cdcdb04ecfd22ba7095e8a4baa4d212a9aaa7b4c73e9e0b331313e2"
+    
+    DEFAULT_SERPAPI_KEY = "Your_serp_api_key"
     if not serpapi_key:
         serpapi_key = DEFAULT_SERPAPI_KEY
 
@@ -147,7 +147,7 @@ with st.sidebar:
     st.subheader("SerpAPI Status")
     serpapi_status_msg = ""
     serpapi_status_class = ""
-    if detector.serpapi_key and detector.serpapi_key != "9af753087cdcdb04ecfd22ba7095e8a4baa4d212a9aaa7b4c73e9e0b331313e2":
+    if detector.serpapi_key and detector.serpapi_key != "yout_serp_api_key":
         serpapi_status_msg = "✅ Active (External API)"
         serpapi_status_class = "active"
     elif using_default_serpapi_key:
