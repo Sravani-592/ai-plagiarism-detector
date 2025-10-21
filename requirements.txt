@@ -4,10 +4,9 @@ sentence-transformers
 google-search-results
 torch
 transformers
-sentencepiece
-protobuf
 numpy
 requests
 beautifulsoup4
 scipy
 scikit-learn
+sentencepiece
