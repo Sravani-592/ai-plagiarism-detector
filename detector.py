@@ -10,8 +10,19 @@ import torch
 import re
 from typing import List, Dict
 from sentence_transformers import SentenceTransformer, util
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, set_seed
-from serpapi import GoogleSearch
+
+# Attempt to import transformers; handle missing backends
+try:
+    from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, set_seed
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
+
+try:
+    from serpapi import GoogleSearch
+    SERPAPI_AVAILABLE = True
+except ImportError:
+    SERPAPI_AVAILABLE = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -41,27 +52,24 @@ class SemanticPlagiarismDetector:
             rephrase_model_name = "t5-small"
 
         # T5 paraphrasing model
-        set_seed(seed)
-        try:
-            self.rephrase_tokenizer = AutoTokenizer.from_pretrained(rephrase_model_name, use_fast=False)
-            self.rephrase_model = AutoModelForSeq2SeqLM.from_pretrained(rephrase_model_name)
-            if self.device == "cuda":
-                self.rephrase_model.to("cuda")
-            self.rephrase_model.eval()
-            logger.info(f"Loaded paraphrase model: {rephrase_model_name}")
-        except Exception as e:
-            logger.warning(f"Failed to load '{rephrase_model_name}'. Falling back to t5-small. Error: {e}")
-            self.rephrase_tokenizer = AutoTokenizer.from_pretrained("t5-small", use_fast=False)
-            self.rephrase_model = AutoModelForSeq2SeqLM.from_pretrained("t5-small")
-            if self.device == "cuda":
-                self.rephrase_model.to("cuda")
-            self.rephrase_model.eval()
-            logger.info("Loaded fallback paraphrase model: t5-small")
+        self.rephrase_model = None
+        self.rephrase_tokenizer = None
+        if TRANSFORMERS_AVAILABLE:
+            try:
+                set_seed(seed)
+                self.rephrase_tokenizer = AutoTokenizer.from_pretrained(rephrase_model_name, use_fast=False)
+                self.rephrase_model = AutoModelForSeq2SeqLM.from_pretrained(rephrase_model_name)
+                if self.device == "cuda":
+                    self.rephrase_model.to("cuda")
+                self.rephrase_model.eval()
+                logger.info(f"Loaded paraphrase model: {rephrase_model_name}")
+            except Exception as e:
+                logger.warning(f"Failed to load '{rephrase_model_name}' model. Paraphrasing disabled. Error: {e}")
 
         # SerpAPI key
-        self.serpapi_key = serpapi_key
-        if not serpapi_key:
-            logger.warning("No SerpAPI key provided. Web plagiarism search will be limited.")
+        self.serpapi_key = serpapi_key if SERPAPI_AVAILABLE else None
+        if not self.serpapi_key:
+            logger.warning("SerpAPI not available or key missing. Web plagiarism search will be limited.")
 
         self._rephrase_cache = {}
 
@@ -79,7 +87,7 @@ class SemanticPlagiarismDetector:
             return ""
 
     # -------------------------
-    # Sentence utilities
+    # Sentence Utilities
     # -------------------------
     def _split_sentences(self, text: str) -> List[str]:
         sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=[.!?])\s+|\n', text)
@@ -99,6 +107,9 @@ class SemanticPlagiarismDetector:
     # T5 Paraphrasing
     # -------------------------
     def _t5_generate_paraphrases(self, sentence: str, num_suggestions: int = 3):
+        if not self.rephrase_model:
+            return ["Paraphrasing not available (missing backend)"]
+
         cache_key = (sentence, num_suggestions)
         if cache_key in self._rephrase_cache:
             return self._rephrase_cache[cache_key]
@@ -141,14 +152,8 @@ class SemanticPlagiarismDetector:
     def search_web_source(self, query: str) -> Dict[str, str]:
         if not self.serpapi_key:
             return {"link": None, "snippet": None}
-        params = {
-            "engine": "google",
-            "q": query,
-            "api_key": self.serpapi_key,
-            "num": "1"
-        }
         try:
-            search = GoogleSearch(params)
+            search = GoogleSearch({"engine": "google", "q": query, "api_key": self.serpapi_key, "num": "1"})
             results = search.get_dict()
             if "organic_results" in results and results["organic_results"]:
                 first_result = results["organic_results"][0]
