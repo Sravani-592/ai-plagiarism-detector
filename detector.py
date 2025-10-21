@@ -10,19 +10,8 @@ import torch
 import re
 from typing import List, Dict
 from sentence_transformers import SentenceTransformer, util
-
-# Attempt to import transformers; handle missing backends
-try:
-    from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, set_seed
-    TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    TRANSFORMERS_AVAILABLE = False
-
-try:
-    from serpapi import GoogleSearch
-    SERPAPI_AVAILABLE = True
-except ImportError:
-    SERPAPI_AVAILABLE = False
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, set_seed
+from serpapi import GoogleSearch
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,37 +28,36 @@ class SemanticPlagiarismDetector:
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"Using device: {self.device}")
 
-        # SentenceTransformer for semantic similarity
+        # Load SentenceTransformer for semantic similarity
         self.model = SentenceTransformer(model_name, device=self.device)
         logger.info(f"Loaded SentenceTransformer: {model_name}")
 
-        # Detect if running on Streamlit Cloud
+        # Detect Streamlit Cloud
         running_on_streamlit_cloud = os.environ.get("STREAMLIT_SERVER_RUNNING") == "true"
-
-        # Use lightweight T5 model on Streamlit Cloud to avoid tokenizer issues
         if running_on_streamlit_cloud:
             logger.info("Running on Streamlit Cloud — using lightweight t5-small model")
             rephrase_model_name = "t5-small"
 
-        # T5 paraphrasing model
+        # Load T5 paraphrasing model safely
+        set_seed(seed)
         self.rephrase_model = None
         self.rephrase_tokenizer = None
-        if TRANSFORMERS_AVAILABLE:
-            try:
-                set_seed(seed)
-                self.rephrase_tokenizer = AutoTokenizer.from_pretrained(rephrase_model_name, use_fast=False)
-                self.rephrase_model = AutoModelForSeq2SeqLM.from_pretrained(rephrase_model_name)
-                if self.device == "cuda":
-                    self.rephrase_model.to("cuda")
-                self.rephrase_model.eval()
-                logger.info(f"Loaded paraphrase model: {rephrase_model_name}")
-            except Exception as e:
-                logger.warning(f"Failed to load '{rephrase_model_name}' model. Paraphrasing disabled. Error: {e}")
+        try:
+            self.rephrase_tokenizer = AutoTokenizer.from_pretrained(rephrase_model_name, use_fast=False)
+            self.rephrase_model = AutoModelForSeq2SeqLM.from_pretrained(rephrase_model_name)
+            if self.device == "cuda":
+                self.rephrase_model.to("cuda")
+            self.rephrase_model.eval()
+            logger.info(f"Loaded paraphrase model: {rephrase_model_name}")
+        except Exception as e:
+            logger.warning(f"Paraphrasing model failed to load: {e}")
+            self.rephrase_model = None
+            self.rephrase_tokenizer = None
 
         # SerpAPI key
-        self.serpapi_key = serpapi_key if SERPAPI_AVAILABLE else None
-        if not self.serpapi_key:
-            logger.warning("SerpAPI not available or key missing. Web plagiarism search will be limited.")
+        self.serpapi_key = serpapi_key
+        if not serpapi_key:
+            logger.warning("No SerpAPI key provided. Web plagiarism search will be limited.")
 
         self._rephrase_cache = {}
 
@@ -87,7 +75,7 @@ class SemanticPlagiarismDetector:
             return ""
 
     # -------------------------
-    # Sentence Utilities
+    # Sentence utilities
     # -------------------------
     def _split_sentences(self, text: str) -> List[str]:
         sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=[.!?])\s+|\n', text)
@@ -104,12 +92,12 @@ class SemanticPlagiarismDetector:
         return embeddings, sentences
 
     # -------------------------
-    # T5 Paraphrasing
+    # T5 Paraphrasing (Cloud-safe)
     # -------------------------
     def _t5_generate_paraphrases(self, sentence: str, num_suggestions: int = 3):
-        if not self.rephrase_model:
-            return ["Paraphrasing not available (missing backend)"]
-
+        if not self.rephrase_model or not self.rephrase_tokenizer:
+            return ["Paraphrasing unavailable due to missing backend."]
+        
         cache_key = (sentence, num_suggestions)
         if cache_key in self._rephrase_cache:
             return self._rephrase_cache[cache_key]
@@ -152,8 +140,9 @@ class SemanticPlagiarismDetector:
     def search_web_source(self, query: str) -> Dict[str, str]:
         if not self.serpapi_key:
             return {"link": None, "snippet": None}
+        params = {"engine": "google", "q": query, "api_key": self.serpapi_key, "num": "1"}
         try:
-            search = GoogleSearch({"engine": "google", "q": query, "api_key": self.serpapi_key, "num": "1"})
+            search = GoogleSearch(params)
             results = search.get_dict()
             if "organic_results" in results and results["organic_results"]:
                 first_result = results["organic_results"][0]
@@ -188,30 +177,25 @@ class SemanticPlagiarismDetector:
         report = []
         similarity_scores = []
 
-        # Process known documents
-        known_doc_embeddings = []
         known_doc_sentences = []
         if known_documents:
             for doc in known_documents:
-                doc_emb, doc_sents = self._get_sentence_embeddings(doc)
-                if doc_emb is not None:
-                    known_doc_embeddings.append(doc_emb)
-                    known_doc_sentences.extend(doc_sents)
+                _, doc_sents = self._get_sentence_embeddings(doc)
+                known_doc_sentences.extend(doc_sents)
 
         for student_sentence in student_sentences:
             current_max_sim = 0.0
             found_source_url = None
             found_source_text = None
 
-            # Check internal docs
-            if known_doc_embeddings:
-                for known_sent in known_doc_sentences:
-                    sim = self._get_semantic_similarity(student_sentence, known_sent)
-                    if sim > current_max_sim:
-                        current_max_sim = sim
-                        found_source_text = f"Internal doc: '{known_sent[:50]}...'"
+            # Internal document check
+            for known_sent in known_doc_sentences:
+                sim = self._get_semantic_similarity(student_sentence, known_sent)
+                if sim > current_max_sim:
+                    current_max_sim = sim
+                    found_source_text = f"Internal doc: '{known_sent[:50]}...'"
 
-            # Check web search
+            # Web search check
             web_result = self.search_web_source(student_sentence)
             if web_result["link"] and web_result["snippet"]:
                 web_snip_sim = self._get_semantic_similarity(student_sentence, web_result["snippet"])
