@@ -2,10 +2,10 @@ streamlit
 nltk
 sentence-transformers
 serpapi
-torch # For sentence-transformers and transformers library
-transformers # For AutoTokenizer, AutoModelForSeq2SeqLM
+torch
+transformers
 numpy
 requests
-beautifulsoup4 # For BeautifulSoup
+beautifulsoup4
 scipy
-scikit-learn # Good to include if any underlying SBERT/transformer components might implicitly use it
+scikit-learn
