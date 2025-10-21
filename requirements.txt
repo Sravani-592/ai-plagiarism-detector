@@ -1,7 +1,7 @@
 streamlit
 nltk
 sentence-transformers
-serpapi
+google-search-results
 torch
 transformers
 numpy
