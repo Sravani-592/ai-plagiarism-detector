@@ -1,6 +1,6 @@
 # ============================================================
 # 🔍 Semantic Plagiarism Detector + Web Search (SerpAPI)
-#      with User Document Upload and Highlighted Output
+#      Cloud-safe version for Streamlit deployment
 # ============================================================
 
 import os
@@ -12,25 +12,9 @@ from typing import List, Dict
 from sentence_transformers import SentenceTransformer, util
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, set_seed
 from serpapi import GoogleSearch
-import requests
-from bs4 import BeautifulSoup
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-class Colors:
-    RED = '\033[91m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    MAGENTA = '\033[95m'
-    CYAN = '\033[96m'
-    WHITE = '\033[97m'
-    RESET = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-    BACKGROUND_RED = '\033[41m'
-    BACKGROUND_YELLOW = '\033[43m'
 
 class SemanticPlagiarismDetector:
     def __init__(
@@ -44,45 +28,54 @@ class SemanticPlagiarismDetector:
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"Using device: {self.device}")
 
-        # SentenceTransformer for similarity
+        # SentenceTransformer for semantic similarity
         self.model = SentenceTransformer(model_name, device=self.device)
         logger.info(f"Loaded SentenceTransformer: {model_name}")
 
         # Detect if running on Streamlit Cloud
         running_on_streamlit_cloud = os.environ.get("STREAMLIT_SERVER_RUNNING") == "true"
 
-        # Use lightweight T5 model on Streamlit Cloud
+        # Use lightweight T5 model on Streamlit Cloud to avoid tokenizer issues
         if running_on_streamlit_cloud:
             logger.info("Running on Streamlit Cloud — using lightweight t5-small model")
             rephrase_model_name = "t5-small"
 
         # T5 paraphrasing model
         set_seed(seed)
-        self.rephrase_tokenizer = AutoTokenizer.from_pretrained(rephrase_model_name, use_fast=False)
-        self.rephrase_model = AutoModelForSeq2SeqLM.from_pretrained(rephrase_model_name)
-        if self.device == "cuda":
-            self.rephrase_model.to("cuda")
-        self.rephrase_model.eval()
-        logger.info(f"Loaded paraphrase model: {rephrase_model_name}")
+        try:
+            self.rephrase_tokenizer = AutoTokenizer.from_pretrained(rephrase_model_name, use_fast=False)
+            self.rephrase_model = AutoModelForSeq2SeqLM.from_pretrained(rephrase_model_name)
+            if self.device == "cuda":
+                self.rephrase_model.to("cuda")
+            self.rephrase_model.eval()
+            logger.info(f"Loaded paraphrase model: {rephrase_model_name}")
+        except Exception as e:
+            logger.warning(f"Failed to load '{rephrase_model_name}'. Falling back to t5-small. Error: {e}")
+            self.rephrase_tokenizer = AutoTokenizer.from_pretrained("t5-small", use_fast=False)
+            self.rephrase_model = AutoModelForSeq2SeqLM.from_pretrained("t5-small")
+            if self.device == "cuda":
+                self.rephrase_model.to("cuda")
+            self.rephrase_model.eval()
+            logger.info("Loaded fallback paraphrase model: t5-small")
 
         # SerpAPI key
         self.serpapi_key = serpapi_key
         if not serpapi_key:
-            logger.warning("No SerpAPI key provided. Web plagiarism source will not be detected.")
+            logger.warning("No SerpAPI key provided. Web plagiarism search will be limited.")
 
         self._rephrase_cache = {}
 
     # -------------------------
-    # Document Loading Utility
+    # Document Utilities
     # -------------------------
     def load_document_text(self, file_path: str) -> str:
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            logger.info(f"Successfully loaded document from {file_path}")
+            logger.info(f"Loaded document: {file_path}")
             return content
         except Exception as e:
-            logger.error(f"Error reading file {file_path}: {e}")
+            logger.error(f"Error reading {file_path}: {e}")
             return ""
 
     # -------------------------
@@ -91,9 +84,6 @@ class SemanticPlagiarismDetector:
     def _split_sentences(self, text: str) -> List[str]:
         sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=[.!?])\s+|\n', text)
         return [s.strip() for s in sentences if s.strip()]
-
-    def _normalize(self, s: str) -> str:
-        return s.strip()
 
     # -------------------------
     # Embeddings
@@ -106,7 +96,7 @@ class SemanticPlagiarismDetector:
         return embeddings, sentences
 
     # -------------------------
-    # T5 paraphrasing
+    # T5 Paraphrasing
     # -------------------------
     def _t5_generate_paraphrases(self, sentence: str, num_suggestions: int = 3):
         cache_key = (sentence, num_suggestions)
@@ -115,9 +105,7 @@ class SemanticPlagiarismDetector:
 
         prompt = f"paraphrase: {sentence}"
         try:
-            input_ids = self.rephrase_tokenizer.encode(
-                prompt, return_tensors="pt", truncation=True, max_length=512
-            )
+            input_ids = self.rephrase_tokenizer.encode(prompt, return_tensors="pt", truncation=True, max_length=512)
             if self.device == "cuda":
                 input_ids = input_ids.to("cuda")
 
@@ -166,9 +154,12 @@ class SemanticPlagiarismDetector:
                 first_result = results["organic_results"][0]
                 return {"link": first_result.get("link"), "snippet": first_result.get("snippet")}
         except Exception as e:
-            logger.warning(f"Web search failed for query '{query}': {e}")
+            logger.warning(f"Web search failed for '{query}': {e}")
         return {"link": None, "snippet": None}
 
+    # -------------------------
+    # Semantic Similarity
+    # -------------------------
     def _get_semantic_similarity(self, sentence1: str, sentence2: str) -> float:
         if not sentence1 or not sentence2:
             return 0.0
