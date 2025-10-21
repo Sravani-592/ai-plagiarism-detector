@@ -50,14 +50,11 @@ This project implements an AI-powered semantic plagiarism detector using Streaml
     The application uses SerpAPI for web searches.
     *   **Get your API Key:** Sign up at [SerpAPI](https://serpapi.com/) to get your API key.
     *   **Securely set the key:**
-        *   **For local development:** Create a file `.env` in your project root (add `*.env` to `.gitignore`) and add:
+        *   **For local development:** In .streamlit folder there is secrets file inside that add your serp api key a:
             ```
             SERPAPI_KEY="YOUR_SERPAPI_KEY_HERE"
             ```
-            Then, in your Streamlit app, `os.environ.get("SERPAPI_KEY")` will pick this up.
-        *   **For Streamlit Cloud:** Use the "Secrets" management interface in your app's settings. Add a secret named `SERPAPI_KEY` with your API key as its value.
-        *   **Important:** **DO NOT** commit your SerpAPI key directly into any code file or `.streamlit/secrets.toml` to a public repository. The `.gitignore` file is set up to prevent `secrets.toml` from being committed.
-
+            and in app.py place your Serp_api_key at line number 104, and 150.
 ## How to Run
 
 1.  Ensure you have followed the setup steps, including setting your SerpAPI key.
