@@ -1,20 +1,22 @@
 # ============================================================
 # 🔍 Semantic Plagiarism Detector + Web Search (SerpAPI)
-#      Cloud-safe version for Streamlit deployment
+#      Optimized for Streamlit deployment
 # ============================================================
 
 import os
 import logging
-import numpy as np
-import torch
 import re
 from typing import List, Dict
+
+import numpy as np
+import torch
 from sentence_transformers import SentenceTransformer, util
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, set_seed
 from serpapi import GoogleSearch
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 class SemanticPlagiarismDetector:
     def __init__(
@@ -62,6 +64,15 @@ class SemanticPlagiarismDetector:
         self._rephrase_cache = {}
 
     # -------------------------
+    # Text Normalization
+    # -------------------------
+    def _normalize_text(self, text: str) -> str:
+        text = text.strip().lower()
+        text = re.sub(r'\s+', ' ', text)  # collapse multiple spaces
+        text = re.sub(r'[^\w\s]', '', text)  # remove punctuation
+        return text
+
+    # -------------------------
     # Document Utilities
     # -------------------------
     def load_document_text(self, file_path: str) -> str:
@@ -88,7 +99,7 @@ class SemanticPlagiarismDetector:
         sentences = self._split_sentences(text)
         if not sentences:
             return None, []
-        embeddings = self.model.encode(sentences, convert_to_tensor=True, show_progress_bar=False)
+        embeddings = self.model.encode([self._normalize_text(s) for s in sentences], convert_to_tensor=True, show_progress_bar=False)
         return embeddings, sentences
 
     # -------------------------
@@ -97,7 +108,7 @@ class SemanticPlagiarismDetector:
     def _t5_generate_paraphrases(self, sentence: str, num_suggestions: int = 3):
         if not self.rephrase_model or not self.rephrase_tokenizer:
             return ["Paraphrasing unavailable due to missing backend."]
-        
+
         cache_key = (sentence, num_suggestions)
         if cache_key in self._rephrase_cache:
             return self._rephrase_cache[cache_key]
@@ -157,7 +168,9 @@ class SemanticPlagiarismDetector:
     def _get_semantic_similarity(self, sentence1: str, sentence2: str) -> float:
         if not sentence1 or not sentence2:
             return 0.0
-        embeddings = self.model.encode([sentence1, sentence2], convert_to_tensor=True)
+        s1 = self._normalize_text(sentence1)
+        s2 = self._normalize_text(sentence2)
+        embeddings = self.model.encode([s1, s2], convert_to_tensor=True)
         return util.pytorch_cos_sim(embeddings[0], embeddings[1]).item()
 
     # -------------------------
@@ -177,23 +190,31 @@ class SemanticPlagiarismDetector:
         report = []
         similarity_scores = []
 
+        # Prepare known document embeddings
         known_doc_sentences = []
+        known_doc_embs = None
         if known_documents:
             for doc in known_documents:
                 _, doc_sents = self._get_sentence_embeddings(doc)
                 known_doc_sentences.extend(doc_sents)
+            if known_doc_sentences:
+                known_doc_embs = self.model.encode([self._normalize_text(s) for s in known_doc_sentences], convert_to_tensor=True)
 
-        for student_sentence in student_sentences:
+        for idx, student_sentence in enumerate(student_sentences):
             current_max_sim = 0.0
             found_source_url = None
             found_source_text = None
 
-            # Internal document check
-            for known_sent in known_doc_sentences:
-                sim = self._get_semantic_similarity(student_sentence, known_sent)
-                if sim > current_max_sim:
-                    current_max_sim = sim
-                    found_source_text = f"Internal doc: '{known_sent[:50]}...'"
+            normalized_student = self._normalize_text(student_sentence)
+
+            # Internal document check (vectorized)
+            if known_doc_embs is not None:
+                student_emb_vec = self.model.encode([normalized_student], convert_to_tensor=True)
+                sims = util.pytorch_cos_sim(student_emb_vec, known_doc_embs)[0]
+                max_sim_val, max_idx = torch.max(sims, dim=0)
+                if max_sim_val.item() > current_max_sim:
+                    current_max_sim = max_sim_val.item()
+                    found_source_text = f"Internal doc: '{known_doc_sentences[max_idx]}'"
 
             # Web search check
             web_result = self.search_web_source(student_sentence)
@@ -217,5 +238,7 @@ class SemanticPlagiarismDetector:
             })
             similarity_scores.append(current_max_sim)
 
-        overall_similarity = np.mean(similarity_scores) if similarity_scores else 0.0
+            logger.debug(f"Sentence {idx+1}: '{student_sentence[:50]}...' | Max similarity: {current_max_sim:.2f}")
+
+        overall_similarity = float(np.mean(similarity_scores)) if similarity_scores else 0.0
         return {"overall_similarity": overall_similarity, "sentences": report}
