@@ -6,6 +6,7 @@ torch
 transformers>=4.30.0
 sentencepiece
 protobuf
+tokenizers
 numpy
 requests
 beautifulsoup4
