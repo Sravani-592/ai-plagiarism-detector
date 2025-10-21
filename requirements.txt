@@ -3,10 +3,11 @@ nltk
 sentence-transformers
 google-search-results
 torch
-transformers[sentencepiece]
+transformers>=4.30.0
+sentencepiece
+protobuf
 numpy
 requests
 beautifulsoup4
 scipy
 scikit-learn
-sentencepiece
