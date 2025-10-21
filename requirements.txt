@@ -3,9 +3,10 @@ nltk
 sentence-transformers
 google-search-results
 torch
-transformers
+transformers[sentencepiece]
 numpy
 requests
 beautifulsoup4
 scipy
 scikit-learn
+sentencepiece
